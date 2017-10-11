@@ -1,222 +1,231 @@
-module ArtistDetail (Model, Action(..), init, view, update) where
+module ArtistDetail exposing (Model, Msg(..), mountShowCmd, init, view, update)
 
 import ServerApi exposing (Artist, ArtistRequest, Album, getArtist, updateArtist, createArtist, getAlbumsByArtist, deleteAlbum)
 import Routes
-import Effects exposing (Effects)
 import Html exposing (..)
 import Html.Attributes exposing (..)
-import Html.Events exposing (onClick, on, targetValue)
+import Html.Events exposing (onClick, onInput, targetValue, on)
 import Http
-import Debug
 
 
 type alias Model =
-  { id : Maybe Int
-  , name : String
-  , albums : List Album
-  }
+    { id : Maybe Int
+    , name : String
+    , albums : List Album
+    }
 
 
-type Action
-  = NoOp
-  | GetArtist (Int)
-  | ShowArtist (Maybe Artist)
-  | SetArtistName (String)
-  | SaveArtist
-  | HandleSaved (Maybe Artist)
-  | HandleAlbumsRetrieved (Maybe (List Album))
-  | DeleteAlbum (Int)
-  | HandleAlbumDeleted (Maybe Http.Response)
+type Msg
+    = ShowArtist (Result Http.Error Artist)
+    | SetArtistName String
+    | SaveArtist
+    | HandleSaved (Result Http.Error Artist)
+    | SaveFailed Http.Error
+    | HandleAlbumsRetrieved (Result Http.Error (List Album))
+    | FetchAlbumsFailed Http.Error
+    | DeleteAlbum Int
+    | HandleAlbumDeleted (Result Http.Error String)
+    | DeleteFailed
 
 
 init : Model
 init =
-  Model Nothing "" []
+    Model Nothing "" []
 
 
-update : Action -> Model -> ( Model, Effects Action )
+mountShowCmd : Int -> Cmd Msg
+mountShowCmd id =
+    getArtist id ShowArtist
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
 update action model =
-  case action of
-    NoOp ->
-      ( model, Effects.none )
+    case action of
 
-    GetArtist id ->
-      ( model, getArtist id ShowArtist )
+        -- TODO: Show error
+        FetchAlbumsFailed err ->
+            ( model, Cmd.none )
 
-    ShowArtist maybeArtist ->
-      case maybeArtist of
-        Just artist ->
-          ( { model
-              | id = Just artist.id
-              , name = artist.name
-            }
-          , getAlbumsByArtist artist.id HandleAlbumsRetrieved
-          )
+        ShowArtist res ->
+            case res of
+                Result.Ok artist ->
+                    ( { model
+                        | id = Just artist.id
+                        , name = artist.name
+                      }
+                    , getAlbumsByArtist artist.id HandleAlbumsRetrieved
+                    )
 
-        -- TODO: This could be an error if returned from api !
-        Nothing ->
-          ( { model
-              | id = Nothing
-              , name = ""
-            }
-          , Effects.none
-          )
+                Result.Err err ->
+                    let _ = Debug.log "Error retrieving artist" err
+                    in
+                        (model, Cmd.none)
 
-    SaveArtist ->
-      case model.id of
-        Just id ->
-          ( model, updateArtist (Artist id model.name) HandleSaved )
+        SaveArtist ->
+            case model.id of
+                Just id ->
+                    ( model, updateArtist (Artist id model.name) HandleSaved )
 
-        Nothing ->
-          ( model, createArtist { name = model.name } HandleSaved )
+                Nothing ->
+                    ( model, createArtist { name = model.name } HandleSaved )
 
-    HandleSaved maybeArtist ->
-      case maybeArtist of
-        Just artist ->
-          ( { model
-              | id = Just artist.id
-              , name = artist.name
-            }
-          , Effects.map (\_ -> NoOp) (Routes.redirect Routes.ArtistListingPage)
-          )
+        HandleSaved res ->
+            case res of
+                Result.Ok artist ->
+                    ( { model
+                        | id = Just artist.id
+                        , name = artist.name
+                      }
+                    , Routes.navigate Routes.ArtistListingPage
+                    )
 
-        Nothing ->
-          Debug.crash "Save failed... we're not handling it..."
+                Result.Err err ->
+                    let _ = Debug.log "Error saving artist" err
+                    in
+                        (model, Cmd.none)
 
-    SetArtistName txt ->
-      ( { model | name = txt }
-      , Effects.none
-      )
 
-    HandleAlbumsRetrieved xs ->
-      ( { model | albums = (Maybe.withDefault [] xs) }
-      , Effects.none
-      )
+        SaveFailed err ->
+            ( model, Cmd.none )
 
-    DeleteAlbum id ->
-      (model, deleteAlbum id HandleAlbumDeleted)
+        SetArtistName txt ->
+            ( { model | name = txt }
+            , Cmd.none
+            )
 
-    HandleAlbumDeleted res ->
-      case model.id of
-        Nothing ->
-          ( model, Effects.none)
+        HandleAlbumsRetrieved res ->
+            case res of
+                Result.Ok albums ->
+                    ( { model | albums = albums }
+                    , Cmd.none
+                    )
 
-        Just id ->
-          ( model, getAlbumsByArtist id HandleAlbumsRetrieved )
+                Result.Err err ->
+                    let _ = Debug.log "Error retrieving albums" err
+                    in
+                        (model, Cmd.none)
+
+        DeleteAlbum id ->
+            ( model, deleteAlbum id HandleAlbumDeleted )
+
+        HandleAlbumDeleted res ->
+            case res of
+                Result.Ok _ ->
+                    case model.id of
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                        Just id ->
+                            ( model, getAlbumsByArtist id HandleAlbumsRetrieved )
+
+                Result.Err err ->
+                    let _ = Debug.log "Error deleting artist" err
+                    in
+                        (model, Cmd.none)
+
+        -- Show generic error
+        DeleteFailed ->
+            ( model, Cmd.none )
 
 
 pageTitle : Model -> String
 pageTitle model =
-  case model.id of
-    Just x ->
-      "Edit artists"
+    case model.id of
+        Just x ->
+            "Edit artist"
 
-    Nothing ->
-      "New artist"
+        Nothing ->
+            "New artist"
 
 
-view : Signal.Address Action -> Model -> Html
-view address model =
-  div
-    []
-    [ h1 [] [ text <| pageTitle model ]
-    , Html.form
-        [ class "form-horizontal" ]
-        [ div
-            [ class "form-group" ]
-            [ label [ class "col-sm-2 control-label" ] [ text "Name" ]
-            , div
-                [ class "col-sm-10" ]
-                [ input
-                    [ class "form-control"
-                    , value model.name
-                    , on "input" targetValue (\str -> Signal.message address (SetArtistName str))
+view : Model -> Html Msg
+view model =
+    div []
+        [ h1 [] [ text <| pageTitle model ]
+        , Html.form [ class "form-horizontal" ]
+            [ div [ class "form-group" ]
+                [ label [ class "col-sm-2 control-label" ] [ text "Name" ]
+                , div [ class "col-sm-10" ]
+                    [ input
+                        [ class "form-control"
+                        , value model.name
+                        , onInput SetArtistName
+                        ]
+                        []
                     ]
-                    []
+                ]
+            , div [ class "form-group" ]
+                [ div [ class "col-sm-offset-2 col-sm-10" ]
+                    [ button
+                        [ class "btn btn-primary"
+                        , type_ "button"
+                        , onClick SaveArtist
+                        ]
+                        [ text "Save" ]
+                    ]
                 ]
             ]
-        , div
-            [ class "form-group" ]
-            [ div
-                [ class "col-sm-offset-2 col-sm-10" ]
-                [ button
-                    [ class "btn btn-default"
-                    , type' "button"
-                    , onClick address SaveArtist
-                    ]
-                    [ text "Save" ]
-                ]
-            ]
+        , h2 [] [ text "Albums" ]
+        , newAlbumButton model
+        , albumListing model
         ]
-    , h2 [] [ text "Albums" ]
-    , newAlbumButton model
-    , albumListing address model
-    ]
 
 
-newAlbumButton :  Model -> Html
+newAlbumButton : Model -> Html Msg
 newAlbumButton model =
-  case model.id of
-    Nothing ->
-      button [class "pull-right btn btn-default disabled"] [ text "New Album"]
+    case model.id of
+        Nothing ->
+            button [ class "pull-right btn btn-default disabled" ] [ text "New Album" ]
 
-    Just x ->
-      button
-        [ class "pull-right btn btn-default"
-        , Routes.clickAttr (Routes.NewArtistAlbumPage x)
+        Just x ->
+            Routes.linkTo (Routes.NewArtistAlbumPage x)
+                [ class "pull-right btn btn-default" ]
+                [ i [ class "glyphicon glyphicon-plus" ] []
+                , text " New Album"
+                ]
+
+
+albumListing : Model -> Html Msg
+albumListing model =
+    table [ class "table table-striped" ]
+        [ thead []
+            [ tr []
+                [ th [] [ text "Name" ]
+                , th [] [ text "Tracks" ]
+                , th [] [ text "Length" ]
+                , th [] []
+                , th [] []
+                ]
+            ]
+        , tbody [] (List.map (albumRow) model.albums)
         ]
-        [ text "New Album" ]
 
 
-albumListing : Signal.Address Action -> Model -> Html
-albumListing address model =
-  table
-    [ class "table table-striped" ]
-    [ thead
-        []
-        [ tr
-            []
-            [ th [] [ text "Name" ]
-            , th [] [ text "Tracks" ]
-            , th [] [ text "Length" ]
-            , th [] []
-            , th [] []
+albumRow : Album -> Html Msg
+albumRow album =
+    tr []
+        [ td [] [ text album.name ]
+        , td [] [ text (toString (List.length album.tracks)) ]
+        , td [] [ text (albumTime album) ]
+        , td []
+            [ Routes.linkTo (Routes.AlbumDetailPage album.id)
+                [ class "btn btn-sm btn-default" ]
+                [ text "Edit" ]
+            ]
+        , td []
+            [ button
+                [ class "btn btn-sm btn-danger"
+                , onClick (DeleteAlbum album.id)
+                ]
+                [ text "Delete!" ]
             ]
         ]
-    , tbody [] (List.map (albumRow address) model.albums)
-    ]
-
-
-albumRow : Signal.Address Action -> Album -> Html
-albumRow address album =
-  tr
-    []
-    [ td [] [ text album.name ]
-    , td [] [ text (toString (List.length album.tracks)) ]
-    , td [] [ text (albumTime album) ]
-    , td
-        []
-        [ button
-            [ class "btn btn-sm btn-default"
-            , Routes.clickAttr <| Routes.AlbumDetailPage album.id
-            ]
-            [ text "Edit" ]
-        ]
-    , td
-        []
-        [ button
-            [ class "btn btn-sm btn-danger"
-            , onClick address (DeleteAlbum album.id)
-            ]
-            [ text "Delete!" ]
-        ]
-    ]
 
 
 albumTime : Album -> String
 albumTime album =
-  let
-    tot =
-      List.map .duration album.tracks |> List.sum
-  in
-    (toString <| tot // 60) ++ ":" ++ (toString <| rem tot 60)
+    let
+        tot =
+            List.map .duration album.tracks |> List.sum
+    in
+        (toString <| tot // 60) ++ ":" ++ (toString <| rem tot 60)

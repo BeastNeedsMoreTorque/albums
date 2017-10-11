@@ -1,33 +1,32 @@
-module Home where
+module Home exposing (Model, init, Msg, update, view)
 
-import Signal
 import Html exposing (div, text, Html)
-import Effects exposing (Effects)
 
 
-type alias Model = ()
+type alias Model =
+    ()
 
 
 init : Model
-init = ()
+init =
+    ()
 
 
-type Action =
-    NoOp
-  | Show
+type Msg
+    = Show
 
 
-update : Action -> Model -> (Model, Effects Action)
-update action model =
-  case action of
-    NoOp ->
-      ( model
-      , Effects.none)
-    Show ->
-      update action model -- Until we actually show something different to a no op !
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        Show ->
+            ( model, Cmd.none )
 
 
 
-view : Signal.Address Action -> Model -> Html
-view address model =
-  div [] [ text "This is the super home page" ]
+-- Until we actually show something different to a no op !
+
+
+view : Model -> Html Msg
+view model =
+    div [] [ text "This is the super home page" ]

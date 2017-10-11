@@ -1,99 +1,111 @@
-module ArtistListing (Model, Action(..), init, view, update) where
+module ArtistListing exposing (Model, Msg, init, view, update, mountCmd)
 
 import ServerApi exposing (..)
 import Routes
 import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (onClick, on, targetValue)
+import Html.Attributes exposing (class, href)
+import Html.Events exposing (onClick)
 import Http
-import Effects exposing (Effects, Never)
 
 
 type alias Model =
-  { artists : List Artist
-  , errors : List String
-  }
+    { artists : List Artist
+    , errors : List String
+    }
 
 
-type Action
-  = Show
-  | HandleArtistsRetrieved (Maybe (List Artist))
-  | DeleteArtist (Int)
-  | HandleArtistDeleted (Maybe Http.Response)
+type Msg
+    = Show
+    | HandleArtistsRetrieved (Result Http.Error (List Artist))
+    | DeleteArtist Int
+    | HandleArtistDeleted (Result Http.Error String)
 
 
 init : Model
 init =
-  Model [] []
+    Model [] []
 
 
-update : Action -> Model -> ( Model, Effects Action )
+mountCmd : Cmd Msg
+mountCmd =
+    ServerApi.getArtists HandleArtistsRetrieved
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
 update action model =
-  case action of
-    Show ->
-      ( model, getArtists HandleArtistsRetrieved )
+    case action of
+        Show ->
+            ( model, mountCmd )
 
-    HandleArtistsRetrieved xs ->
-      ( { model | artists = (Maybe.withDefault [] xs) }
-      , Effects.none
-      )
+        HandleArtistsRetrieved res ->
+            case res of
+                Result.Ok artists ->
+                    ( { model | artists = artists }
+                    , Cmd.none
+                    )
 
-    DeleteArtist id ->
-      ( model, deleteArtist id HandleArtistDeleted )
+                Result.Err err ->
+                    let _ = Debug.log "Error retrieving artist" err
+                    in
+                        (model, Cmd.none)
 
-    HandleArtistDeleted res ->
-      ( model, getArtists HandleArtistsRetrieved )
+
+        DeleteArtist id ->
+            ( model, deleteArtist id HandleArtistDeleted )
+
+        HandleArtistDeleted res ->
+            case res of
+                Result.Ok _ ->
+                    update Show model
+
+                Result.Err err ->
+                    let _ = Debug.log "Error deleting artist" err
+                    in
+                        (model, Cmd.none)
+
+
 
 
 
 ------ VIEW ------
 
 
-artistRow : Signal.Address Action -> Artist -> Html
-artistRow address artist =
-  tr
-    []
-    [ td [] [ text artist.name ]
-    , td
-        []
-        [ button
-            [ class "btn btn-sm btn-default"
-            , Routes.clickAttr <| Routes.ArtistDetailPage artist.id
+view : Model -> Html Msg
+view model =
+    div []
+        [ h1 [] [ text "Artists" ]
+        , Routes.linkTo Routes.NewArtistPage
+            [ class "pull-right btn btn-default" ]
+            [ i [ class "glyphicon glyphicon-plus" ] []
+            , text " New Artist"
             ]
-            [ text "Edit" ]
-        ]
-    , td
-        []
-        [ button
-            [ class "btn btn-sm btn-danger"
-            , onClick address (DeleteArtist (.id artist))
-            ]
-            [ text "Delete!" ]
-        ]
-    ]
-
-
-view : Signal.Address Action -> Model -> Html
-view address model =
-  div
-    []
-    [ h1 [] [ text "Artists" ]
-    , button
-        [ class "pull-right btn btn-default"
-        , Routes.clickAttr Routes.NewArtistPage
-        ]
-        [ text "New Artist" ]
-    , table
-        [ class "table table-striped" ]
-        [ thead
-            []
-            [ tr
-                []
-                [ th [] [ text "Name" ]
-                , th [] []
-                , th [] []
+        , table [ class "table table-striped" ]
+            [ thead []
+                [ tr []
+                    [ th [] [ text "Name" ]
+                    , th [] []
+                    , th [] []
+                    ]
                 ]
+            , tbody [] (List.map artistRow model.artists)
             ]
-        , tbody [] (List.map (artistRow address) model.artists)
         ]
-    ]
+
+
+artistRow : Artist -> Html Msg
+artistRow artist =
+    tr []
+        [ td [] [ text artist.name ]
+        , td []
+            [ Routes.linkTo (Routes.ArtistDetailPage artist.id)
+                [ class "btn btn-sm btn-default" ]
+                [ text "Edit" ]
+            ]
+        , td []
+            [ button
+                [ class "btn btn-sm btn-danger"
+                , onClick <| DeleteArtist (.id artist)
+                ]
+                [ text "Delete!" ]
+            ]
+        ]
